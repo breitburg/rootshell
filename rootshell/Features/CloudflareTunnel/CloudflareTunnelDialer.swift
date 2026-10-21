@@ -61,8 +61,10 @@ nonisolated enum CloudflareTunnelDialer {
         }
     }
 
-    /// Opens the WebSocket, signing in to Access first when the route uses a
-    /// browser sign-in and no usable token is stored.
+    /// Opens the WebSocket. With browser sign-in, a stored token is tried
+    /// first, then no token (like cloudflared, so hosts without an Access
+    /// application never show a sheet), and only a redirect to the Access
+    /// login page asks the user to sign in.
     static func open(tunnel: CloudflareTunnel, host: String, port: Int, timeout: TimeAmount) async throws -> CloudflareWebSocketPipe {
         guard let endpoint = tunnel.endpoint(host: host, port: port) else {
             throw CloudflareTunnelError.invalidHostname(host)
@@ -84,6 +86,11 @@ nonisolated enum CloudflareTunnelDialer {
                 default: throw error
                 }
             }
+        }
+        do {
+            return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: nil), hostname: endpoint.hostname, timeout: seconds)
+        } catch CloudflareTunnelError.signInRequired {
+            logger.info("\(endpoint.hostname, privacy: .public) requires a Cloudflare Access sign-in")
         }
         let token = try await CloudflareAccessSignIn.signIn(hostname: endpoint.hostname)
         return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: token), hostname: endpoint.hostname, timeout: seconds)

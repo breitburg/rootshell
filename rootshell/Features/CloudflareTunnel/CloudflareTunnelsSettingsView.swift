@@ -203,7 +203,7 @@ struct CloudflareTunnelEditView: View {
                 case .none:
                     Text("Use when no Access application protects these host names.")
                 case .browser:
-                    Text("You'll be asked to sign in with your identity provider the first time you connect, and again when the session expires.")
+                    Text("If an Access application protects the host, you'll be asked to sign in with your identity provider when you connect, and again when the session expires. Hosts without one connect directly.")
                 case .serviceToken:
                     Text("For automation and shared devices. Create a service token under Access › Service Auth and allow it with a Service Auth policy.")
                 }
