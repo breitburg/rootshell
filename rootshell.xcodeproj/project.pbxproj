@@ -118,6 +118,8 @@
 		47AC7E57000000000000DA01 /* rootshell/Features/Transfer/Attachments/PasteAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000DA02 /* rootshell/Features/Transfer/Attachments/PasteAttachment.swift */; };
 		47AC7E57000000000000DC01 /* rootshell/Features/Dictation/Core/DictationFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000DC02 /* rootshell/Features/Dictation/Core/DictationFormatter.swift */; };
 		47AC7E57000000000000DC03 /* rootshell/Features/Dictation/Core/DictationVocabulary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000DC04 /* rootshell/Features/Dictation/Core/DictationVocabulary.swift */; };
+		47AC7E57000000000000CF01 /* rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000CF11 /* rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift */; };
+		47AC7E57000000000000CF02 /* rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000CF12 /* rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift */; };
 		47AC7E57000000000000E6A1 /* rootshell/Features/SSH/Config/ProxyJumpSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000E6B1 /* rootshell/Features/SSH/Config/ProxyJumpSpec.swift */; };
 		47AC7E57000000000000E6A2 /* rootshell/Features/SSH/Config/OpenSSHHostResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000E6B2 /* rootshell/Features/SSH/Config/OpenSSHHostResolution.swift */; };
 		47AC7E57000000000000E6A3 /* rootshell/Features/SSH/Config/OpenSSHConfigParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC7E57000000000000E6B3 /* rootshell/Features/SSH/Config/OpenSSHConfigParser.swift */; };
@@ -638,6 +640,8 @@
 		47AC7E57000000000000DA02 /* rootshell/Features/Transfer/Attachments/PasteAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/Transfer/Attachments/PasteAttachment.swift; sourceTree = SOURCE_ROOT; };
 		47AC7E57000000000000DC02 /* rootshell/Features/Dictation/Core/DictationFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/Dictation/Core/DictationFormatter.swift; sourceTree = SOURCE_ROOT; };
 		47AC7E57000000000000DC04 /* rootshell/Features/Dictation/Core/DictationVocabulary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/Dictation/Core/DictationVocabulary.swift; sourceTree = SOURCE_ROOT; };
+		47AC7E57000000000000CF11 /* rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift; sourceTree = SOURCE_ROOT; };
+		47AC7E57000000000000CF12 /* rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift; sourceTree = SOURCE_ROOT; };
 		47AC7E57000000000000E6B1 /* rootshell/Features/SSH/Config/ProxyJumpSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/SSH/Config/ProxyJumpSpec.swift; sourceTree = SOURCE_ROOT; };
 		47AC7E57000000000000E6B2 /* rootshell/Features/SSH/Config/OpenSSHHostResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/SSH/Config/OpenSSHHostResolution.swift; sourceTree = SOURCE_ROOT; };
 		47AC7E57000000000000E6B3 /* rootshell/Features/SSH/Config/OpenSSHConfigParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rootshell/Features/SSH/Config/OpenSSHConfigParser.swift; sourceTree = SOURCE_ROOT; };
@@ -1340,6 +1344,8 @@
 				47AC7E57000000000000F7BA /* rootshell/Features/Effects/Weather/Data/NWSClient.swift */,
 				47AC7E57000000000000F7BB /* rootshell/Features/Effects/Weather/Data/METNorwayClient.swift */,
 				47AC7E57000000000000F7BC /* rootshell/Features/Effects/Weather/Data/OpenMeteoClient.swift */,
+				47AC7E57000000000000CF11 /* rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift */,
+				47AC7E57000000000000CF12 /* rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift */,
 				47AC7E57000000000000E6B1 /* rootshell/Features/SSH/Config/ProxyJumpSpec.swift */,
 				47AC7E57000000000000E6B2 /* rootshell/Features/SSH/Config/OpenSSHHostResolution.swift */,
 				47AC7E57000000000000E6B3 /* rootshell/Features/SSH/Config/OpenSSHConfigParser.swift */,
@@ -2383,6 +2389,8 @@
 				47AC7E57000000000000F7AA /* rootshell/Features/Effects/Weather/Data/NWSClient.swift in Sources */,
 				47AC7E57000000000000F7AB /* rootshell/Features/Effects/Weather/Data/METNorwayClient.swift in Sources */,
 				47AC7E57000000000000F7AC /* rootshell/Features/Effects/Weather/Data/OpenMeteoClient.swift in Sources */,
+				47AC7E57000000000000CF01 /* rootshell/Features/CloudflareTunnel/CloudflareTunnel.swift in Sources */,
+				47AC7E57000000000000CF02 /* rootshell/Features/SSH/HostTrust/SSHHostPatternMatcher.swift in Sources */,
 				47AC7E57000000000000E6A1 /* rootshell/Features/SSH/Config/ProxyJumpSpec.swift in Sources */,
 				47AC7E57000000000000E6A2 /* rootshell/Features/SSH/Config/OpenSSHHostResolution.swift in Sources */,
 				47AC7E57000000000000E6A3 /* rootshell/Features/SSH/Config/OpenSSHConfigParser.swift in Sources */,

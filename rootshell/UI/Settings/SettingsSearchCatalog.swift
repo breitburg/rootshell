@@ -53,6 +53,7 @@ enum SettingsSearchDestination: String, Hashable, CaseIterable {
     case wifiAPProviders
     case kubernetesClusters
     case backgroundTunnels
+    case cloudflareTunnels
     case roam
     case screenSharing
     case uploads
@@ -275,6 +276,9 @@ extension SettingsSearchDestination {
         case .backgroundTunnels:
             Meta(section: .connections, title: String(localized: "Background Tunnels"), systemImage: "arrow.triangle.swap",
                  keywords: ["port forwarding", "tunnels", "stop all", "event history", "profiles", "local forward"])
+        case .cloudflareTunnels:
+            Meta(section: .connections, title: String(localized: "Cloudflare Tunnels"), systemImage: "point.3.filled.connected.trianglepath.dotted",
+                 keywords: ["cloudflare", "cloudflared", "zero trust", "access", "argo", "service token", "websocket", "bastion", "proxycommand"])
         case .roam:
             Meta(section: .connections, title: String(localized: "Roam"), systemImage: "antenna.radiowaves.left.and.right",
                  keywords: ["mobility", "handoff", "mosh"])
@@ -1238,6 +1242,8 @@ func settingsSearchDestinationView(for destination: SettingsSearchDestination) -
         KubernetesSettingsView()
     case .backgroundTunnels:
         TunnelSettingsView()
+    case .cloudflareTunnels:
+        CloudflareTunnelsSettingsView()
     case .roam:
         RoamSettingsView()
     case .screenSharing:

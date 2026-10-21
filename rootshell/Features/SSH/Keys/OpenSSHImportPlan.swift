@@ -29,6 +29,8 @@ struct OpenSSHProfilePlan: Identifiable, Hashable {
     /// The final SSHKey UUIDs are resolved at apply time so they reference
     /// real keychain entries, not preview-side plan UUIDs.
     var jumpHostSources: [JumpHostSource]
+    /// Route saved on apply when the ProxyCommand is `cloudflared access ssh`.
+    var cloudflareTunnel: CloudflareTunnel?
     /// Source diagnostic ("config:42") for tooltip / debug.
     var source: String
 
@@ -37,7 +39,12 @@ struct OpenSSHProfilePlan: Identifiable, Hashable {
 
     /// Display string for the jump chain extracted from ProxyJump / ProxyCommand.
     var jumpHostDisplay: String? {
-        jumpHostSources.isEmpty ? nil : jumpHostSources.map(\.display).joined(separator: " → ")
+        var hops = jumpHostSources.map(\.display)
+        if let cloudflareTunnel {
+            let tunnel = cloudflareTunnel.trimmedBastionHostname.map { "Cloudflare Tunnel (\($0))" } ?? "Cloudflare Tunnel"
+            hops.insert(tunnel, at: 0)
+        }
+        return hops.isEmpty ? nil : hops.joined(separator: " → ")
     }
 
     /// Raw jump host data captured during parse. Apply uses the
@@ -187,8 +194,17 @@ enum OpenSSHImporter {
         // Build the key registry first by collecting every distinct IdentityFile
         // path across all concrete entries (after wildcard inheritance).
         var resolvedConcretes: [(entry: OpenSSHHostEntry, identityPaths: [String], jump: OpenSSHHostResolution.JumpChainResolution)] = []
+        var cloudflareTunnels: [String: CloudflareTunnel] = [:]
         for entry in concretes {
-            let resolved = OpenSSHHostResolution.resolve(entry: entry, entries: parseResult.entries)
+            var resolved = OpenSSHHostResolution.resolve(entry: entry, entries: parseResult.entries)
+            // `ProxyCommand cloudflared access ssh --hostname %h` becomes a
+            // Cloudflare Tunnel route rather than a jump host.
+            let targetHost = resolved.hostName ?? resolved.aliases.first ?? ""
+            if let command = resolved.proxyCommand,
+               let cloudflared = CloudflaredProxyCommand.parse(command, host: targetHost) {
+                cloudflareTunnels[targetHost.lowercased()] = cloudflared.tunnel(for: targetHost)
+                resolved.proxyCommand = nil
+            }
             let paths = resolved.identityFiles.map { resolveIdentityPath($0, sshDirectory: sshDirectory) }
             let jump = OpenSSHHostResolution.resolveJumpChain(
                 for: resolved, entries: parseResult.entries,
@@ -262,6 +278,7 @@ enum OpenSSHImporter {
                 user: user,
                 identityKeyPlanIDs: identityKeyPlanIDs,
                 jumpHostSources: jumpSources,
+                cloudflareTunnel: cloudflareTunnels[hostName.lowercased()],
                 source: "\(entry.sourceFile.lastPathComponent):\(entry.sourceLine)"
             )
             profiles.append(profile)
@@ -451,6 +468,9 @@ enum OpenSSHImporter {
                     tags: ["imported", "openssh"]
                 )
                 profilesCreated += 1
+                if let tunnel = profilePlan.cloudflareTunnel {
+                    CloudflareTunnelStore.shared.addIfUncovered(tunnel, host: profilePlan.hostName)
+                }
             } catch {
                 let reason = error.localizedDescription
                 let name = profilePlan.name

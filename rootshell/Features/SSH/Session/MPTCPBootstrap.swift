@@ -70,6 +70,10 @@ enum MPTCPBootstrap {
         port: Int,
         timeout: TimeAmount = .seconds(30)
     ) async throws -> Channel {
+        if let channel = try await CloudflareTunnelDialer.channel(host: host, port: port, timeout: timeout) {
+            logger.info("cloudflare tunnel connect \(host):\(port)")
+            return channel
+        }
         #if !CHINA_BUILD
         if let channel = try await TailnetDialer.channel(host: host, port: port, timeout: timeout) {
             logger.info("tailnet connect \(host):\(port)")

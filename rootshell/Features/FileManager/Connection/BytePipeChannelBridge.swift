@@ -16,13 +16,16 @@ nonisolated enum BytePipeChannelBridge {
     private static let logger = Logger(subsystem: "com.rootshell", category: "FileManagerBridge")
 
     /// Returns a Channel carrying the pipe's bytes. Closing either side tears down both.
-    static func makeChannel(for pipe: AsyncBytePipe) async throws -> Channel {
+    /// Pass `autoRead: false` for a channel handed to `SSHClient.connect(on:)`,
+    /// which must install its handlers before the server banner is read.
+    static func makeChannel(for pipe: AsyncBytePipe, autoRead: Bool = true) async throws -> Channel {
         var fds: [Int32] = [0, 0]
         guard socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0 else { throw POSIXError.current }
 
         let channel: Channel
         do {
             channel = try await NIOPipeBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+                .channelOption(ChannelOptions.autoRead, value: autoRead)
                 .takingOwnershipOfDescriptor(inputOutput: fds[0])
                 .get()
         } catch {
