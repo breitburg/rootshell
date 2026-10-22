@@ -48,6 +48,20 @@ extension InitialConnectRetry {
         // re-open the browser, so treat it as permanent.
         if case OpenPubkeyError.reauthenticationRequired = error { return true }
 
+        if isPermanentCloudflareError(error) { return true }
+
         return false
+    }
+
+    /// Cloudflare Tunnel failures a retry can't fix: a host behind Cloudflare
+    /// Access, or a host name the tunnel can't dial.
+    static func isPermanentCloudflareError(_ error: Error) -> Bool {
+        guard let tunnel = error as? CloudflareTunnelError else { return false }
+        switch tunnel {
+        case .accessProtected, .invalidHostname:
+            return true
+        case .handshakeFailed, .timedOut:
+            return false
+        }
     }
 }

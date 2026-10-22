@@ -453,6 +453,8 @@ public final class ReconnectionManager: ObservableObject {
         // Legacy-encrypted key with no local passphrase — needs manual unlock
         if case SSHKeyManager.LoadError.legacyKeyNeedsUnlock = error { return true }
 
+        if InitialConnectRetry.isPermanentCloudflareError(error) { return true }
+
         // Check for authentication-related errors that shouldn't be retried
         let errorDescription = error.localizedDescription.lowercased()
 

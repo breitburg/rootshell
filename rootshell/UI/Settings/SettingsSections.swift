@@ -1016,6 +1016,19 @@ struct SettingsConnectionsSection: View {
                 }
                 .themedRow()
 
+                NavigationLink(value: SettingsSearchDestination.cloudflareTunnels) {
+                    HStack(spacing: 12) {
+                        SettingsIcon(systemName: "point.3.filled.connected.trianglepath.dotted")
+                        Text(String(localized: "Cloudflare Tunnels", comment: "Settings row: hosts reached through Cloudflare Tunnel"))
+                        Spacer()
+                        let tunnelCount = CloudflareTunnelStore.shared.tunnels.count
+                        Text(tunnelCount == 0 ? String(localized: "None", comment: "Settings status: none configured") : "\(tunnelCount)")
+                            .foregroundColor(.secondary)
+                            .font(.subheadline)
+                    }
+                }
+                .themedRow()
+
                 NavigationLink(value: SettingsSearchDestination.roam) {
                     HStack(spacing: 12) {
                         SettingsIcon(systemName: "antenna.radiowaves.left.and.right")

@@ -121,6 +121,7 @@ See the [herdr control mode guide](docs/herdr-control-mode.md) for setup, the fo
 ### SSH & Networking
 - **Native SSH Client** - Written entirely in Swift with no external dependencies
 - **Jump Hosts** - Multi-hop connections through bastion servers
+- **Cloudflare Tunnels** - SSH to hosts published through Cloudflare Tunnel without cloudflared, bastion mode, and `cloudflared access ssh` ProxyCommand import from ssh_config
 - **SSH Agent Forwarding** - Three approval modes: auto-approve, per-session, per-request
 - **Secure Enclave Keys** - Hardware-protected P-256 keys generated in and never leaving the Secure Enclave, alongside software Ed25519, ECDSA, and RSA keys with biometric protection
 - **Passkey-Backed Keys** - `sk-ecdsa-sha2-nistp256` keys created, held, and synced by your passkey provider (iCloud Keychain or a third-party manager like 1Password), confirmed per signature with Face ID or Touch ID
