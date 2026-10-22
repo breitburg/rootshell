@@ -56,36 +56,17 @@ final class CloudflareTunnelTests: XCTestCase {
         XCTAssertNotNil(tunnel.validationError)
         tunnel.hostPatterns = "ssh.example.com"
         XCTAssertNil(tunnel.validationError)
-        tunnel.authMode = .serviceToken
+        tunnel.bastionHostname = "not a host"
         XCTAssertNotNil(tunnel.validationError)
-        tunnel.serviceTokenID = "id.access"
-        tunnel.serviceTokenSecret = "secret"
-        XCTAssertNil(tunnel.validationError)
     }
 
-    func testDecodingToleratesMissingFields() throws {
+    func testDecodingToleratesMissingAndRetiredFields() throws {
         let id = UUID()
-        let json = Data(#"{"id":"\#(id.uuidString)","hostPatterns":"ssh.example.com","authMode":"futureMode"}"#.utf8)
+        let json = Data(#"{"id":"\#(id.uuidString)","hostPatterns":"ssh.example.com","authMode":"serviceToken","serviceTokenID":"x"}"#.utf8)
         let tunnel = try JSONDecoder().decode(CloudflareTunnel.self, from: json)
         XCTAssertEqual(tunnel.id, id)
-        XCTAssertEqual(tunnel.authMode, .browser)
+        XCTAssertEqual(tunnel.hostPatterns, "ssh.example.com")
         XCTAssertTrue(tunnel.isEnabled)
-    }
-
-    // MARK: - JWT
-
-    func testJWTExpiry() {
-        func token(exp: TimeInterval) -> String {
-            let payload = Data(#"{"exp":\#(Int(exp)),"aud":["x"]}"#.utf8).base64EncodedString()
-                .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
-                .replacingOccurrences(of: "=", with: "")
-            return "eyJhbGciOiJSUzI1NiJ9.\(payload).c2ln"
-        }
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        XCTAssertEqual(CloudflareAccessJWT.expiry(of: token(exp: 1_800_003_600)), Date(timeIntervalSince1970: 1_800_003_600))
-        XCTAssertTrue(CloudflareAccessJWT.isUsable(token(exp: 1_800_003_600), now: now))
-        XCTAssertFalse(CloudflareAccessJWT.isUsable(token(exp: 1_800_000_030), now: now))
-        XCTAssertNil(CloudflareAccessJWT.expiry(of: "not-a-jwt"))
     }
 
     // MARK: - ProxyCommand
@@ -95,21 +76,17 @@ final class CloudflareTunnelTests: XCTestCase {
         XCTAssertNil(parsed.hostname)
         let tunnel = parsed.tunnel(for: "ssh.example.com")
         XCTAssertEqual(tunnel.hostPatterns, "ssh.example.com")
-        XCTAssertEqual(tunnel.authMode, .browser)
         XCTAssertNil(tunnel.trimmedBastionHostname)
     }
 
-    func testParsesServiceTokenAndDestination() throws {
+    func testParsesDestinationAndSkipsTokenFlags() throws {
         let command = #"cloudflared --loglevel debug access ssh --hostname=jump.example.com --destination %h:22 --id "abc.access" --service-token-secret 's3cr et'"#
         let parsed = try XCTUnwrap(CloudflaredProxyCommand.parse(command, host: "db.internal"))
         XCTAssertEqual(parsed.hostname, "jump.example.com")
         XCTAssertEqual(parsed.destination, "db.internal:22")
-        XCTAssertEqual(parsed.serviceTokenID, "abc.access")
-        XCTAssertEqual(parsed.serviceTokenSecret, "s3cr et")
         let tunnel = parsed.tunnel(for: "db.internal")
         XCTAssertEqual(tunnel.hostPatterns, "db.internal")
         XCTAssertEqual(tunnel.bastionHostname, "jump.example.com")
-        XCTAssertEqual(tunnel.authMode, .serviceToken)
     }
 
     func testRejectsOtherProxyCommands() {

@@ -72,9 +72,6 @@ final class CloudflareTunnelStore {
 
     func delete(_ id: UUID) throws {
         try KeychainManager.shared.deleteCloudflareTunnel(identifier: id.uuidString)
-        if let removed = tunnels.first(where: { $0.id == id }) {
-            for hostname in removed.signInHostnames { CloudflareAccessTokens.remove(hostname: hostname) }
-        }
         reload()
     }
 
@@ -89,38 +86,5 @@ final class CloudflareTunnelStore {
             Self.logger.error("Saving imported Cloudflare tunnel failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
-    }
-}
-
-extension CloudflareTunnel {
-    /// Tunnel hostnames a browser sign-in is kept for: the bastion, or each
-    /// pattern that names one host.
-    nonisolated var signInHostnames: [String] {
-        if let bastion = trimmedBastionHostname { return [bastion] }
-        return patterns.filter { !$0.hasPrefix("!") && !$0.contains("*") && !$0.contains("?") }
-    }
-}
-
-/// Access app tokens from browser sign-in, kept per tunnel hostname.
-nonisolated enum CloudflareAccessTokens {
-    static func usableToken(hostname: String) -> String? {
-        guard let token = KeychainManager.shared.loadCloudflareAccessToken(hostname: hostname) else { return nil }
-        guard CloudflareAccessJWT.isUsable(token) else {
-            remove(hostname: hostname)
-            return nil
-        }
-        return token
-    }
-
-    static func store(_ token: String, hostname: String) {
-        try? KeychainManager.shared.saveCloudflareAccessToken(token, hostname: hostname)
-    }
-
-    static func remove(hostname: String) {
-        KeychainManager.shared.deleteCloudflareAccessToken(hostname: hostname)
-    }
-
-    static func expiry(hostname: String) -> Date? {
-        KeychainManager.shared.loadCloudflareAccessToken(hostname: hostname).flatMap(CloudflareAccessJWT.expiry(of:))
     }
 }

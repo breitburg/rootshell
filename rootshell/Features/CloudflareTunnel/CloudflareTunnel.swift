@@ -11,23 +11,11 @@
 import Foundation
 
 nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
-    enum AuthMode: String, Codable, CaseIterable, Sendable {
-        /// The tunnel hostname has no Access application in front of it.
-        case none
-        /// Sign in to Cloudflare Access in a web view; the app token is kept per hostname.
-        case browser
-        /// An Access service token (`Cf-Access-Client-Id` / `Cf-Access-Client-Secret`).
-        case serviceToken
-    }
-
     var id = UUID()
     var name = ""
     /// Comma- or space-separated OpenSSH-style globs, e.g. `ssh.example.com`
     /// or `*.example.com, !www.example.com`.
     var hostPatterns = ""
-    var authMode: AuthMode = .browser
-    var serviceTokenID = ""
-    var serviceTokenSecret = ""
     /// Bastion mode: connect to this tunnel hostname and ask it to forward to
     /// the dialed `host:port` (`cloudflared access ssh --destination`). Empty
     /// connects to the dialed host itself.
@@ -37,14 +25,11 @@ nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
     init() {}
 
     init(from decoder: Decoder) throws {
-        // Tolerant decoding: items written by newer builds sync to older ones.
+        // Tolerant decoding: a field added later is missing from older items.
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         hostPatterns = try container.decodeIfPresent(String.self, forKey: .hostPatterns) ?? ""
-        authMode = (try? container.decodeIfPresent(AuthMode.self, forKey: .authMode)) ?? .browser
-        serviceTokenID = try container.decodeIfPresent(String.self, forKey: .serviceTokenID) ?? ""
-        serviceTokenSecret = try container.decodeIfPresent(String.self, forKey: .serviceTokenSecret) ?? ""
         bastionHostname = try container.decodeIfPresent(String.self, forKey: .bastionHostname) ?? ""
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
     }
@@ -66,28 +51,13 @@ nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// OpenSSH `match_pattern_list` semantics: a negated pattern always
-    /// excludes; otherwise any positive match wins.
     func matches(host: String) -> Bool {
         let name = Self.normalize(host)
-        guard !name.isEmpty else { return false }
-        var positive = false
-        for raw in patterns {
-            var pattern = raw
-            let negated = pattern.hasPrefix("!")
-            if negated { pattern.removeFirst() }
-            guard !pattern.isEmpty else { continue }
-            if SSHHostPatternMatcher.matchGlob(name, pattern: pattern) {
-                if negated { return false }
-                positive = true
-            }
-        }
-        return positive
+        return !name.isEmpty && SSHHostPatternMatcher.matches(host: name, patterns: patterns)
     }
 
     /// Where the WebSocket goes and what it asks the tunnel to reach.
     struct Endpoint: Equatable, Sendable {
-        /// The tunnel hostname; Access tokens are kept per this name.
         var hostname: String
         var url: URL
         /// `Cf-Access-Jump-Destination`, bastion mode only.
@@ -96,12 +66,13 @@ nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
 
     func endpoint(host: String, port: Int) -> Endpoint? {
         let target = Self.normalize(host)
-        let hostname = trimmedBastionHostname ?? target
-        guard !hostname.isEmpty, let url = URL(string: "wss://\(hostname)"), url.host != nil else { return nil }
+        var hostname = target
         var destination: String?
-        if trimmedBastionHostname != nil {
+        if let bastion = trimmedBastionHostname {
+            hostname = bastion
             destination = target.contains(":") ? "[\(target)]:\(port)" : "\(target):\(port)"
         }
+        guard let url = Self.webSocketURL(hostname) else { return nil }
         return Endpoint(hostname: hostname, url: url, jumpDestination: destination)
     }
 
@@ -110,14 +81,15 @@ nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
         if patterns.allSatisfy({ $0.hasPrefix("!") }) {
             return String(localized: "Enter at least one host name.", comment: "Cloudflare tunnel validation")
         }
-        if let bastion = trimmedBastionHostname, URL(string: "wss://\(bastion)")?.host == nil {
+        if let bastion = trimmedBastionHostname, Self.webSocketURL(bastion) == nil {
             return String(localized: "The bastion host name isn't valid.", comment: "Cloudflare tunnel validation")
         }
-        if authMode == .serviceToken,
-           serviceTokenID.trimmingCharacters(in: .whitespaces).isEmpty || serviceTokenSecret.isEmpty {
-            return String(localized: "Enter the service token's Client ID and Client Secret.", comment: "Cloudflare tunnel validation")
-        }
         return nil
+    }
+
+    private static func webSocketURL(_ hostname: String) -> URL? {
+        guard !hostname.isEmpty, let url = URL(string: "wss://\(hostname)"), url.host != nil else { return nil }
+        return url
     }
 
     /// Lowercased, without IPv6 brackets, a scheme, a path or a trailing dot.
@@ -134,28 +106,6 @@ nonisolated struct CloudflareTunnel: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-// MARK: - Access tokens
-
-/// Reads the expiry out of a Cloudflare Access JWT (`CF_Authorization`).
-nonisolated enum CloudflareAccessJWT {
-    static func expiry(of token: String) -> Date? {
-        let parts = token.split(separator: ".")
-        guard parts.count == 3 else { return nil }
-        var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        while payload.count % 4 != 0 { payload += "=" }
-        guard let data = Data(base64Encoded: payload),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let exp = object["exp"] as? NSNumber else { return nil }
-        return Date(timeIntervalSince1970: exp.doubleValue)
-    }
-
-    /// Usable for at least another minute.
-    static func isUsable(_ token: String, now: Date = Date()) -> Bool {
-        guard let expiry = expiry(of: token) else { return false }
-        return expiry.timeIntervalSince(now) > 60
-    }
-}
-
 // MARK: - ssh_config
 
 /// `ProxyCommand cloudflared access ssh --hostname %h [...]`, as written by
@@ -163,8 +113,6 @@ nonisolated enum CloudflareAccessJWT {
 nonisolated struct CloudflaredProxyCommand: Equatable, Sendable {
     /// The `--hostname` value with `%h` resolved, or nil when it was `%h` itself.
     var hostname: String?
-    var serviceTokenID: String?
-    var serviceTokenSecret: String?
     /// `--destination`, which makes `hostname` a bastion.
     var destination: String?
 
@@ -200,8 +148,6 @@ nonisolated struct CloudflaredProxyCommand: Equatable, Sendable {
             let expanded = value.map { expand($0, host: host) }
             switch flag {
             case "hostname", "tunnel-host", "t": hostnameValue = expanded
-            case "service-token-id", "id": result.serviceTokenID = expanded
-            case "service-token-secret", "secret": result.serviceTokenSecret = expanded
             case "destination": result.destination = expanded
             default: break
             }
@@ -222,11 +168,6 @@ nonisolated struct CloudflaredProxyCommand: Equatable, Sendable {
         var tunnel = CloudflareTunnel()
         tunnel.hostPatterns = CloudflareTunnel.normalize(host)
         if destination != nil, let hostname { tunnel.bastionHostname = hostname }
-        if let id = serviceTokenID, let secret = serviceTokenSecret, !id.isEmpty, !secret.isEmpty {
-            tunnel.authMode = .serviceToken
-            tunnel.serviceTokenID = id
-            tunnel.serviceTokenSecret = secret
-        }
         return tunnel
     }
 

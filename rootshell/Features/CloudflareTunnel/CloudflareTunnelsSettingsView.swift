@@ -6,6 +6,7 @@
 //  through a Cloudflare Tunnel, and the editor for one route.
 //
 
+import NIOCore
 import SwiftUI
 
 struct CloudflareTunnelsSettingsView: View {
@@ -24,7 +25,7 @@ struct CloudflareTunnelsSettingsView: View {
                             .font(.system(size: 44))
                             .foregroundStyle(.secondary)
                         Text("No Cloudflare Tunnels").font(.headline)
-                        Text("Reach SSH servers published through a Cloudflare Tunnel, with or without Cloudflare Access, without installing cloudflared.")
+                        Text("Reach SSH servers published through a Cloudflare Tunnel without installing cloudflared.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -50,7 +51,7 @@ struct CloudflareTunnelsSettingsView: View {
                         pendingDelete = offsets.first.map { store.tunnels[$0] }
                     }
                 } footer: {
-                    Text("Connections to a matching host, including jump hosts, Git and file transfers, go through the tunnel. Routes and service tokens are stored in iCloud Keychain and sync to your other devices.")
+                    Text("Connections to a matching host, including jump hosts, Git and file transfers, go through the tunnel. Routes are stored in iCloud Keychain and sync to your other devices.")
                 }
             }
         }
@@ -106,21 +107,11 @@ private struct CloudflareTunnelRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(tunnel.displayName)
                     .foregroundStyle(tunnel.isEnabled ? .primary : .secondary)
-                Text([tunnel.patterns.joined(separator: ", "), tunnel.authMode.title].joined(separator: " · "))
+                Text(tunnel.patterns.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-        }
-    }
-}
-
-extension CloudflareTunnel.AuthMode {
-    var title: String {
-        switch self {
-        case .none: String(localized: "No Access", comment: "Cloudflare tunnel authentication: no Cloudflare Access application")
-        case .browser: String(localized: "Browser Sign-In", comment: "Cloudflare tunnel authentication: sign in to Cloudflare Access in a web view")
-        case .serviceToken: String(localized: "Service Token", comment: "Cloudflare tunnel authentication: Cloudflare Access service token")
         }
     }
 }
@@ -134,9 +125,6 @@ struct CloudflareTunnelEditView: View {
     @State private var test: TestState = .idle
     @State private var saveError: String?
     @State private var testTask: Task<Void, Never>?
-    /// Bumped after a sign-in or sign-out so the status rows re-read the keychain.
-    @State private var tokenGeneration = 0
-    @State private var signInError: String?
     @Environment(\.dismiss) private var dismiss
 
     private enum TestState: Equatable {
@@ -174,39 +162,6 @@ struct CloudflareTunnelEditView: View {
                 Text("Hosts")
             } footer: {
                 Text("The public host names from your tunnel's ingress rules. Separate several with commas; * matches any part of a name, and !name excludes one. Connect to the host name as usual, for example ssh user@ssh.example.com.")
-            }
-
-            Section {
-                Picker(String(localized: "Authentication", comment: "Cloudflare tunnel field"), selection: $draft.authMode) {
-                    ForEach(CloudflareTunnel.AuthMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .themedRow()
-                if draft.authMode == .serviceToken {
-                    plainField(String(localized: "Client ID", comment: "Cloudflare Access service token field"),
-                               text: $draft.serviceTokenID, prompt: String(localized: "Required", comment: "Placeholder for a required field"))
-                        .themedRow()
-                    labeledRow(String(localized: "Client Secret", comment: "Cloudflare Access service token field")) {
-                        SecureField(String(localized: "Client Secret", comment: "Cloudflare Access service token field"), text: $draft.serviceTokenSecret,
-                                    prompt: Text(String(localized: "Required", comment: "Placeholder for a required field")))
-                    }
-                    .themedRow()
-                }
-                if draft.authMode == .browser {
-                    signInRows
-                }
-            } header: {
-                Text("Cloudflare Access")
-            } footer: {
-                switch draft.authMode {
-                case .none:
-                    Text("Use when no Access application protects these host names.")
-                case .browser:
-                    Text("If an Access application protects the host, you'll be asked to sign in with your identity provider when you connect, and again when the session expires. Hosts without one connect directly.")
-                case .serviceToken:
-                    Text("For automation and shared devices. Create a service token under Access › Service Auth and allow it with a Service Auth policy.")
-                }
             }
 
             Section {
@@ -273,49 +228,6 @@ struct CloudflareTunnelEditView: View {
         } message: {
             Text(saveError ?? "")
         }
-        .alert(
-            String(localized: "Couldn't Sign In", comment: "Cloudflare Access sign-in failure title"),
-            isPresented: Binding(get: { signInError != nil }, set: { if !$0 { signInError = nil } })
-        ) {
-            Button(String(localized: "OK", comment: "OK button"), role: .cancel) {}
-        } message: {
-            Text(signInError ?? "")
-        }
-    }
-
-    @ViewBuilder
-    private var signInRows: some View {
-        let _ = tokenGeneration
-        ForEach(draft.signInHostnames, id: \.self) { hostname in
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hostname)
-                    if let expiry = CloudflareAccessTokens.expiry(hostname: hostname), expiry > Date() {
-                        Text("Signed in until \(expiry.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Not signed in")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if CloudflareAccessTokens.usableToken(hostname: hostname) != nil {
-                    Button(String(localized: "Sign Out", comment: "Cloudflare Access: forget the stored sign-in"), role: .destructive) {
-                        CloudflareAccessTokens.remove(hostname: hostname)
-                        tokenGeneration += 1
-                    }
-                    .buttonStyle(.borderless)
-                } else {
-                    Button(String(localized: "Sign In", comment: "Cloudflare Access: sign in now")) {
-                        signIn(hostname)
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            .themedRow()
-        }
     }
 
     /// iOS forms hide a text field's title once it has a prompt, so the label is drawn separately.
@@ -333,18 +245,6 @@ struct CloudflareTunnelEditView: View {
             TextField(title, text: text, prompt: Text(prompt))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-        }
-    }
-
-    private func signIn(_ hostname: String) {
-        Task {
-            do {
-                _ = try await CloudflareAccessSignIn.signIn(hostname: hostname)
-            } catch CloudflareAccessSignInError.cancelled {
-            } catch {
-                signInError = error.localizedDescription
-            }
-            tokenGeneration += 1
         }
     }
 
@@ -366,28 +266,30 @@ struct CloudflareTunnelEditView: View {
             let result: TestState
             do {
                 let pipe = try await CloudflareTunnelDialer.open(tunnel: tunnel, host: host, port: 22, timeout: .seconds(20))
-                do {
-                    let banner = try await withTimeout(seconds: 10) { try await pipe.read(maxBytes: 255) }
-                    let line = banner.flatMap { String(data: $0, encoding: .utf8) }?
-                        .split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-                    if line.hasPrefix("SSH-") {
-                        result = .succeeded(String(localized: "Connected. The server identifies as \(line).",
-                                                   comment: "Cloudflare tunnel test result; argument is an SSH version banner"))
-                    } else {
-                        result = .failed(String(localized: "The tunnel opened, but the origin didn't send an SSH banner. Check the ingress rule's service.",
-                                                   comment: "Cloudflare tunnel test result"))
-                    }
-                } catch {
-                    result = .failed(String(localized: "The tunnel opened, but the origin didn't answer: \(error.localizedDescription)",
-                                            comment: "Cloudflare tunnel test result; argument is an error message"))
-                }
+                result = await Self.probeBanner(pipe)
                 await pipe.close()
             } catch {
                 result = .failed(error.localizedDescription)
             }
-            tokenGeneration += 1
             guard !Task.isCancelled else { return }
             test = result
+        }
+    }
+
+    private static func probeBanner(_ pipe: CloudflareWebSocketPipe) async -> TestState {
+        do {
+            let banner = try await withTimeout(seconds: 10) { try await pipe.read(maxBytes: 255) }
+            let line = banner.flatMap { String(data: $0, encoding: .utf8) }?
+                .split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            guard line.hasPrefix("SSH-") else {
+                return .failed(String(localized: "The tunnel opened, but the origin didn't send an SSH banner. Check the ingress rule's service.",
+                                      comment: "Cloudflare tunnel test result"))
+            }
+            return .succeeded(String(localized: "Connected. The server identifies as \(line).",
+                                     comment: "Cloudflare tunnel test result; argument is an SSH version banner"))
+        } catch {
+            return .failed(String(localized: "The tunnel opened, but the origin didn't answer: \(error.localizedDescription)",
+                                  comment: "Cloudflare tunnel test result; argument is an error message"))
         }
     }
 }

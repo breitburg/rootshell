@@ -53,15 +53,12 @@ extension InitialConnectRetry {
         return false
     }
 
-    /// Cloudflare Tunnel failures a retry can't fix: a cancelled Access sign-in,
-    /// a policy that denies the user or token, or a route needing credentials.
-    /// A missing window stays retryable so a reconnect started in the
-    /// background signs in once the app is in front.
+    /// Cloudflare Tunnel failures a retry can't fix: a host behind Cloudflare
+    /// Access, or a host name the tunnel can't dial.
     static func isPermanentCloudflareError(_ error: Error) -> Bool {
-        if case CloudflareAccessSignInError.cancelled = error { return true }
         guard let tunnel = error as? CloudflareTunnelError else { return false }
         switch tunnel {
-        case .signInRequired, .accessDenied, .invalidHostname:
+        case .accessProtected, .invalidHostname:
             return true
         case .handshakeFailed, .timedOut:
             return false

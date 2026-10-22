@@ -958,15 +958,14 @@ class KeychainManager {
         }
     }
 
-    // MARK: - Storage Provider Storage
+    // MARK: - Synced Item Storage
 
-    /// Whole provider configs (credentials included), synced through iCloud Keychain.
-    private let storageProviderService = "com.rootshell.storage.provider"
-
-    private func storageProviderQuery(identifier: String?) -> [String: Any] {
+    /// One generic-password item per identifier under `service`, synced
+    /// through iCloud Keychain. Callers store whole JSON-encoded configs.
+    private nonisolated func syncedItemQuery(service: String, identifier: String?) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: storageProviderService,
+            kSecAttrService as String: service,
             kSecAttrAccessGroup as String: accessGroup,
             kSecAttrSynchronizable as String: true
         ]
@@ -974,9 +973,9 @@ class KeychainManager {
         return query
     }
 
-    /// Adds or replaces the provider stored under `identifier`.
-    func saveStorageProvider(_ data: Data, identifier: String, label: String) throws {
-        let query = storageProviderQuery(identifier: identifier)
+    /// Adds or replaces the item stored under `identifier`.
+    private nonisolated func saveSyncedItem(_ data: Data, service: String, identifier: String, label: String) throws {
+        let query = syncedItemQuery(service: service, identifier: identifier)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrLabel as String: label
@@ -988,13 +987,13 @@ class KeychainManager {
             status = SecItemAdd(add as CFDictionary, nil)
         }
         guard status == errSecSuccess else {
-            Self.logger.error("saveStorageProvider failed - Status: \(status) (\(Self.keychainErrorString(status)))")
+            Self.logger.error("Saving \(service, privacy: .public) failed - Status: \(status)")
             throw KeychainError.unexpectedStatus(status)
         }
     }
 
-    func loadAllStorageProviders() throws -> [Data] {
-        var query = storageProviderQuery(identifier: nil)
+    private nonisolated func loadAllSyncedItems(service: String) throws -> [Data] {
+        var query = syncedItemQuery(service: service, identifier: nil)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: AnyObject?
@@ -1004,98 +1003,45 @@ class KeychainManager {
         return result as? [Data] ?? []
     }
 
-    func deleteStorageProvider(identifier: String) throws {
-        let status = SecItemDelete(storageProviderQuery(identifier: identifier) as CFDictionary)
+    private nonisolated func deleteSyncedItem(service: String, identifier: String) throws {
+        let status = SecItemDelete(syncedItemQuery(service: service, identifier: identifier) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
+    }
+
+    // MARK: - Storage Provider Storage
+
+    /// Whole provider configs (credentials included).
+    private nonisolated let storageProviderService = "com.rootshell.storage.provider"
+
+    func saveStorageProvider(_ data: Data, identifier: String, label: String) throws {
+        try saveSyncedItem(data, service: storageProviderService, identifier: identifier, label: label)
+    }
+
+    func loadAllStorageProviders() throws -> [Data] {
+        try loadAllSyncedItems(service: storageProviderService)
+    }
+
+    func deleteStorageProvider(identifier: String) throws {
+        try deleteSyncedItem(service: storageProviderService, identifier: identifier)
     }
 
     // MARK: - Cloudflare Tunnel Storage
 
-    /// Whole tunnel routes (service tokens included), synced through iCloud Keychain.
+    /// Tunnel routes.
     private nonisolated let cloudflareTunnelService = "com.rootshell.cloudflare.tunnel"
-    /// Access app tokens per tunnel hostname. They expire within hours, so they stay on this device.
-    private nonisolated let cloudflareAccessTokenService = "com.rootshell.cloudflare.access-token"
-
-    private nonisolated func cloudflareTunnelQuery(identifier: String?) -> [String: Any] {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cloudflareTunnelService,
-            kSecAttrAccessGroup as String: accessGroup,
-            kSecAttrSynchronizable as String: true
-        ]
-        if let identifier { query[kSecAttrAccount as String] = identifier }
-        return query
-    }
-
-    private nonisolated func cloudflareAccessTokenQuery(hostname: String?) -> [String: Any] {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cloudflareAccessTokenService,
-            kSecAttrAccessGroup as String: accessGroup
-        ]
-        if let hostname { query[kSecAttrAccount as String] = hostname }
-        return query
-    }
-
-    /// Adds or replaces the item matching `query`.
-    private nonisolated func upsert(query: [String: Any], data: Data, label: String) throws {
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrLabel as String: label
-        ]
-        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            var add = query.merging(attributes) { $1 }
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            status = SecItemAdd(add as CFDictionary, nil)
-        }
-        guard status == errSecSuccess else {
-            Self.logger.error("Keychain upsert failed - Status: \(status)")
-            throw KeychainError.unexpectedStatus(status)
-        }
-    }
 
     nonisolated func saveCloudflareTunnel(_ data: Data, identifier: String, label: String) throws {
-        try upsert(query: cloudflareTunnelQuery(identifier: identifier), data: data, label: label)
+        try saveSyncedItem(data, service: cloudflareTunnelService, identifier: identifier, label: label)
     }
 
     nonisolated func loadAllCloudflareTunnels() throws -> [Data] {
-        var query = cloudflareTunnelQuery(identifier: nil)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return [] }
-        guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
-        return result as? [Data] ?? []
+        try loadAllSyncedItems(service: cloudflareTunnelService)
     }
 
     nonisolated func deleteCloudflareTunnel(identifier: String) throws {
-        let status = SecItemDelete(cloudflareTunnelQuery(identifier: identifier) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
-        }
-    }
-
-    nonisolated func saveCloudflareAccessToken(_ token: String, hostname: String) throws {
-        try upsert(query: cloudflareAccessTokenQuery(hostname: hostname), data: Data(token.utf8),
-                   label: "rootshell: Cloudflare Access (\(hostname))")
-    }
-
-    nonisolated func loadCloudflareAccessToken(hostname: String) -> String? {
-        var query = cloudflareAccessTokenQuery(hostname: hostname)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    nonisolated func deleteCloudflareAccessToken(hostname: String) {
-        SecItemDelete(cloudflareAccessTokenQuery(hostname: hostname) as CFDictionary)
+        try deleteSyncedItem(service: cloudflareTunnelService, identifier: identifier)
     }
 
     // MARK: - Scrollback Encryption Key Storage

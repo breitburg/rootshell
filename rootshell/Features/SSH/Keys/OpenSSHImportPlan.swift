@@ -193,16 +193,16 @@ enum OpenSSHImporter {
 
         // Build the key registry first by collecting every distinct IdentityFile
         // path across all concrete entries (after wildcard inheritance).
-        var resolvedConcretes: [(entry: OpenSSHHostEntry, identityPaths: [String], jump: OpenSSHHostResolution.JumpChainResolution)] = []
-        var cloudflareTunnels: [String: CloudflareTunnel] = [:]
+        var resolvedConcretes: [(entry: OpenSSHHostEntry, identityPaths: [String], jump: OpenSSHHostResolution.JumpChainResolution, cloudflareTunnel: CloudflareTunnel?)] = []
         for entry in concretes {
             var resolved = OpenSSHHostResolution.resolve(entry: entry, entries: parseResult.entries)
             // `ProxyCommand cloudflared access ssh --hostname %h` becomes a
             // Cloudflare Tunnel route rather than a jump host.
             let targetHost = resolved.hostName ?? resolved.aliases.first ?? ""
+            var cloudflareTunnel: CloudflareTunnel?
             if let command = resolved.proxyCommand,
                let cloudflared = CloudflaredProxyCommand.parse(command, host: targetHost) {
-                cloudflareTunnels[targetHost.lowercased()] = cloudflared.tunnel(for: targetHost)
+                cloudflareTunnel = cloudflared.tunnel(for: targetHost)
                 resolved.proxyCommand = nil
             }
             let paths = resolved.identityFiles.map { resolveIdentityPath($0, sshDirectory: sshDirectory) }
@@ -214,11 +214,11 @@ enum OpenSSHImporter {
                 },
                 resolvePath: { resolveIdentityPath($0, sshDirectory: sshDirectory) }
             )
-            resolvedConcretes.append((resolved, paths, jump))
+            resolvedConcretes.append((resolved, paths, jump, cloudflareTunnel))
         }
 
         var keyPlanByPath: [String: OpenSSHKeyPlan] = [:]
-        for (_, paths, jump) in resolvedConcretes {
+        for (_, paths, jump, _) in resolvedConcretes {
             let hopPaths = jump.hops.flatMap { $0.identityPaths ?? [] }
             for path in paths + hopPaths where keyPlanByPath[path] == nil {
                 keyPlanByPath[path] = buildKeyPlan(path: path)
@@ -238,7 +238,7 @@ enum OpenSSHImporter {
         var skipped: [OpenSSHSkippedEntry] = []
         var warnings = parseResult.warnings
 
-        for (entry, identityPaths, jump) in resolvedConcretes {
+        for (entry, identityPaths, jump, cloudflareTunnel) in resolvedConcretes {
             let hostName = entry.hostName ?? entry.aliases.first ?? ""
             let port = entry.port ?? 22
             let user = entry.user ?? Self.defaultUsername
@@ -278,7 +278,7 @@ enum OpenSSHImporter {
                 user: user,
                 identityKeyPlanIDs: identityKeyPlanIDs,
                 jumpHostSources: jumpSources,
-                cloudflareTunnel: cloudflareTunnels[hostName.lowercased()],
+                cloudflareTunnel: cloudflareTunnel,
                 source: "\(entry.sourceFile.lastPathComponent):\(entry.sourceLine)"
             )
             profiles.append(profile)

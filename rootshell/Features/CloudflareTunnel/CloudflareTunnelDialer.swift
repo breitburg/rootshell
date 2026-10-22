@@ -5,8 +5,9 @@
 //  The client half of `cloudflared access ssh`, in-app: a WebSocket to
 //  wss://<tunnel hostname> carries the raw TCP stream as binary messages, and
 //  the tunnel's ingress rule connects it to the SSH server. MPTCPBootstrap
-//  asks here first, so SSH, Mosh/tssh bootstrap, Git, SFTP and jump hosts
+//  asks here first, so SSH, the Mosh/tssh bootstrap, Git, SFTP and jump hosts
 //  all reach hosts behind a Cloudflare Tunnel without cloudflared installed.
+//  Hosts behind a Cloudflare Access application aren't supported.
 //
 
 import Foundation
@@ -15,8 +16,7 @@ import os
 
 nonisolated enum CloudflareTunnelError: LocalizedError {
     case invalidHostname(String)
-    case signInRequired(String)
-    case accessDenied(String, status: Int, usedServiceToken: Bool)
+    case accessProtected(String)
     case handshakeFailed(String, status: Int)
     case timedOut(String)
 
@@ -25,15 +25,9 @@ nonisolated enum CloudflareTunnelError: LocalizedError {
         case .invalidHostname(let host):
             String(localized: "“\(host)” can't be reached over a Cloudflare Tunnel because it isn't a valid host name.",
                    comment: "Cloudflare tunnel connection error; argument is a host name")
-        case .signInRequired(let hostname):
-            String(localized: "\(hostname) is protected by Cloudflare Access. Set its route to sign in with a browser or a service token in Settings › Connections › Cloudflare Tunnels.",
+        case .accessProtected(let hostname):
+            String(localized: "\(hostname) is protected by Cloudflare Access, which rootshell doesn't support. Remove the Access application from this host name to connect.",
                    comment: "Cloudflare tunnel connection error; argument is a host name")
-        case .accessDenied(let hostname, let status, let usedServiceToken):
-            usedServiceToken
-                ? String(localized: "Cloudflare Access rejected the service token for \(hostname) (HTTP \(status)). Check the Client ID, the Client Secret and that the application's policy includes the token.",
-                         comment: "Cloudflare tunnel connection error; arguments are a host name and an HTTP status code")
-                : String(localized: "Cloudflare Access denied the connection to \(hostname) (HTTP \(status)). Your account may not be allowed by the application's policy.",
-                         comment: "Cloudflare tunnel connection error; arguments are a host name and an HTTP status code")
         case .handshakeFailed(let hostname, let status):
             String(localized: "\(hostname) answered HTTP \(status) instead of opening a tunnel. Check that a Cloudflare Tunnel ingress rule serves this host name with an ssh:// or tcp:// service.",
                    comment: "Cloudflare tunnel connection error; arguments are a host name and an HTTP status code")
@@ -61,62 +55,14 @@ nonisolated enum CloudflareTunnelDialer {
         }
     }
 
-    /// Opens the WebSocket. With browser sign-in, a stored token is tried
-    /// first, then no token (like cloudflared, so hosts without an Access
-    /// application never show a sheet), and only a redirect to the Access
-    /// login page asks the user to sign in.
     static func open(tunnel: CloudflareTunnel, host: String, port: Int, timeout: TimeAmount) async throws -> CloudflareWebSocketPipe {
         guard let endpoint = tunnel.endpoint(host: host, port: port) else {
             throw CloudflareTunnelError.invalidHostname(host)
         }
-        let seconds = max(1, Double(timeout.nanoseconds) / 1_000_000_000)
         logger.info("Opening Cloudflare Tunnel to \(endpoint.hostname, privacy: .public) for \(host, privacy: .public)")
-
-        guard tunnel.authMode == .browser else {
-            return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: nil), hostname: endpoint.hostname, timeout: seconds)
-        }
-        if let token = CloudflareAccessTokens.usableToken(hostname: endpoint.hostname) {
-            do {
-                return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: token), hostname: endpoint.hostname, timeout: seconds)
-            } catch let error as CloudflareTunnelError {
-                // Revoked, or the application's session duration is shorter
-                // than the token's expiry: sign in again.
-                switch error {
-                case .signInRequired, .accessDenied: CloudflareAccessTokens.remove(hostname: endpoint.hostname)
-                default: throw error
-                }
-            }
-        }
-        do {
-            return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: nil), hostname: endpoint.hostname, timeout: seconds)
-        } catch CloudflareTunnelError.signInRequired {
-            logger.info("\(endpoint.hostname, privacy: .public) requires a Cloudflare Access sign-in")
-        }
-        let token = try await CloudflareAccessSignIn.signIn(hostname: endpoint.hostname)
-        return try await CloudflareWebSocketPipe.connect(request(for: endpoint, tunnel: tunnel, accessToken: token), hostname: endpoint.hostname, timeout: seconds)
+        let seconds = max(1, Double(timeout.nanoseconds) / 1_000_000_000)
+        return try await CloudflareWebSocketPipe.connect(endpoint, timeout: seconds)
     }
-
-    private static func request(for endpoint: CloudflareTunnel.Endpoint, tunnel: CloudflareTunnel, accessToken: String?) -> URLRequest {
-        var request = URLRequest(url: endpoint.url)
-        request.httpShouldHandleCookies = false
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        if tunnel.authMode == .serviceToken {
-            request.setValue(tunnel.serviceTokenID.trimmingCharacters(in: .whitespaces), forHTTPHeaderField: "Cf-Access-Client-Id")
-            request.setValue(tunnel.serviceTokenSecret, forHTTPHeaderField: "Cf-Access-Client-Secret")
-        }
-        if let accessToken {
-            request.setValue(accessToken, forHTTPHeaderField: "Cf-Access-Token")
-        }
-        if let destination = endpoint.jumpDestination {
-            request.setValue(destination, forHTTPHeaderField: "Cf-Access-Jump-Destination")
-        }
-        return request
-    }
-
-    private static let userAgent: String = {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        return "rootshell/\(version)"
-    }()
 }
 
 /// The WebSocket as an AsyncBytePipe, for BytePipeChannelBridge.
@@ -124,46 +70,57 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
     /// Cloudflare drops idle WebSockets after about 100 seconds.
     private static let pingInterval: UInt64 = 30
 
+    private static let userAgent: String = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        return "rootshell/\(version)"
+    }()
+
     private struct State {
         var openContinuation: CheckedContinuation<Void, Error>?
         /// An outcome that arrived before the continuation was stored.
         var openResult: Result<Void, Error>?
-        var redirectLocation: String?
         var pending = Data()
         var closed = false
     }
 
     private let hostname: String
-    private let usedServiceToken: Bool
     private let state = OSAllocatedUnfairLock(initialState: State())
-    private var session: URLSession?
-    private var task: URLSessionWebSocketTask?
+    private var session: URLSession!
+    private var task: URLSessionWebSocketTask!
     private var keepAlive: Task<Void, Never>?
 
-    private init(hostname: String, usedServiceToken: Bool) {
-        self.hostname = hostname
-        self.usedServiceToken = usedServiceToken
-    }
-
-    static func connect(_ request: URLRequest, hostname: String, timeout: TimeInterval) async throws -> CloudflareWebSocketPipe {
-        let pipe = CloudflareWebSocketPipe(hostname: hostname, usedServiceToken: request.value(forHTTPHeaderField: "Cf-Access-Client-Id") != nil)
-        try await pipe.start(request, timeout: timeout)
-        return pipe
-    }
-
-    private func start(_ request: URLRequest, timeout: TimeInterval) async throws {
+    private init(_ endpoint: CloudflareTunnel.Endpoint) {
+        hostname = endpoint.hostname
+        super.init()
+        var request = URLRequest(url: endpoint.url)
+        request.httpShouldHandleCookies = false
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        if let destination = endpoint.jumpDestination {
+            request.setValue(destination, forHTTPHeaderField: "Cf-Access-Jump-Destination")
+        }
         let configuration = URLSessionConfiguration.ephemeral
         // URLSession's idle timeouts would cut a quiet shell; the open is
-        // bounded by our own timer below.
+        // bounded by our own timer.
         configuration.timeoutIntervalForRequest = 7 * 24 * 3600
         configuration.timeoutIntervalForResource = 365 * 24 * 3600
         configuration.waitsForConnectivity = false
-        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        let task = session.webSocketTask(with: request)
+        session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        task = session.webSocketTask(with: request)
         task.maximumMessageSize = 16 * 1024 * 1024
-        self.session = session
-        self.task = task
+    }
 
+    static func connect(_ endpoint: CloudflareTunnel.Endpoint, timeout: TimeInterval) async throws -> CloudflareWebSocketPipe {
+        let pipe = CloudflareWebSocketPipe(endpoint)
+        try await pipe.start(timeout: timeout)
+        return pipe
+    }
+
+    private func start(timeout: TimeInterval) async throws {
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.finishOpen(.failure(CloudflareTunnelError.timedOut(self.hostname)))
+        }
+        defer { timer.cancel() }
         do {
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -177,10 +134,7 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
                         return
                     }
                     task.resume()
-                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
-                        guard let self else { return }
-                        self.finishOpen(.failure(CloudflareTunnelError.timedOut(self.hostname)))
-                    }
+                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
                 }
             } onCancel: {
                 self.finishOpen(.failure(CancellationError()))
@@ -195,7 +149,7 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
                 try? await Task.sleep(nanoseconds: Self.pingInterval * 1_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 if await !self.ping() {
-                    await self.close()
+                    self.closeNow()
                     return
                 }
             }
@@ -221,17 +175,16 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
     }
 
     private func ping() async -> Bool {
-        guard let task else { return false }
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             task.sendPing { error in continuation.resume(returning: error == nil) }
         }
     }
 
     private func teardown() {
         keepAlive?.cancel()
-        task?.cancel(with: .normalClosure, reason: nil)
+        task.cancel(with: .normalClosure, reason: nil)
         // Breaks the session's strong reference to its delegate (self).
-        session?.invalidateAndCancel()
+        session.invalidateAndCancel()
     }
 
     // MARK: AsyncBytePipe
@@ -244,7 +197,7 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
             return Data(chunk)
         }
         if let buffered { return buffered }
-        guard let task, !state.withLock({ $0.closed }) else { return nil }
+        guard !state.withLock({ $0.closed }) else { return nil }
 
         while true {
             let message: URLSessionWebSocketTask.Message
@@ -269,11 +222,15 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
     }
 
     func write(_ data: Data) async throws {
-        guard let task, !state.withLock({ $0.closed }) else { throw POSIXError(.EPIPE) }
+        guard !state.withLock({ $0.closed }) else { throw POSIXError(.EPIPE) }
         try await task.send(.data(data))
     }
 
     func close() async {
+        closeNow()
+    }
+
+    private func closeNow() {
         let wasClosed = state.withLock { state -> Bool in
             defer { state.closed = true }
             return state.closed
@@ -292,33 +249,25 @@ nonisolated final class CloudflareWebSocketPipe: NSObject, AsyncBytePipe, URLSes
         _ session: URLSession,
         task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest
-    ) async -> URLRequest? {
-        // A redirect means Access wants a sign-in; following it would load the login page.
-        let location = response.value(forHTTPHeaderField: "Location") ?? request.url?.absoluteString
-        state.withLock { $0.redirectLocation = location }
-        return nil
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        // Cloudflare Access redirects to its login page; don't load it.
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let response = task.response as? HTTPURLResponse
-        let location = state.withLock { $0.redirectLocation } ?? response?.value(forHTTPHeaderField: "Location")
         let failure: Error
-        if let status = response?.statusCode, status != 101 {
-            if (300..<400).contains(status) || location != nil {
-                failure = CloudflareTunnelError.signInRequired(hostname)
-            } else if status == 401 || status == 403 {
-                failure = CloudflareTunnelError.accessDenied(hostname, status: status, usedServiceToken: usedServiceToken)
-            } else {
-                failure = CloudflareTunnelError.handshakeFailed(hostname, status: status)
-            }
-        } else if location != nil {
-            failure = CloudflareTunnelError.signInRequired(hostname)
-        } else {
+        switch (task.response as? HTTPURLResponse)?.statusCode {
+        case nil, 101:
             failure = error ?? URLError(.networkConnectionLost)
+        case let status? where (300..<400).contains(status) || status == 401 || status == 403:
+            failure = CloudflareTunnelError.accessProtected(hostname)
+        case let status?:
+            failure = CloudflareTunnelError.handshakeFailed(hostname, status: status)
         }
         finishOpen(.failure(failure))
         // After a successful open, the stream ended: unblock readers and writers.
-        if isOpen { Task { await self.close() } }
+        if isOpen { closeNow() }
     }
 }

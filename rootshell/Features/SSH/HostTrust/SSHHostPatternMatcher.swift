@@ -25,7 +25,7 @@ enum SSHHostPatternMatcher {
     /// matches at least one positive pattern. This lets an admin scope a CA with
     /// e.g. `*.example.com,!bastion.example.com` and have `bastion.example.com`
     /// correctly excluded.
-    static func matches(host: String, patterns: [String]) -> Bool {
+    nonisolated static func matches(host: String, patterns: [String]) -> Bool {
         let normalizedHost = host.lowercased()
         var positiveMatch = false
         for entry in patterns {
